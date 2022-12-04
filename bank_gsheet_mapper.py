@@ -11,8 +11,7 @@ class Mapper:
     latest_paypal_csv_path = "C:\\Users\\bruno\\Documents\\Python Projects v2\\personal_finances\\bank_csvs\\" # D4ELEMZ9DJQR6-MSR-20220701000000-20220731235959.CSV
     read_paypal_csv = True
     read_bank_csv = True
-    total_paypal_gains = 0.0
-    total_paypal_losses = 0.0
+    __paypal_surplus: float
     transferred_expenses = []
     recurrent_expense_identifiers = ["IGNORE", "MIETE", "Spotify", "Scribd", "AUDIBLE GMBH", "ANLAGE", "WACHSTUMS-SPAREN",
                                      "Virtus Jiu-Jitsu", "Allgemeine WÃ¤hrungsumrechnung"]
@@ -40,6 +39,11 @@ class Mapper:
         self.__read_bank_csv()
 
     def __read_paypal_csv(self):
+        """
+        Read expenses to add to google sheet and saves them in 'expenses2add'.
+        At the same time it calculates the total gains (equivalent to taking from bank account) and losses (equivalent to paying to a provider).
+        :return:
+        """
         # do not read if not wanted by user
         if self.read_paypal_csv is False:
             return
@@ -52,19 +56,20 @@ class Mapper:
                 description = row[11]
                 # fetch additional info
                 additional_info = row[3]
-                # verify if expense is recurrent or if it has already been transfered to gsheet
-                if self.__expense_is_recurrent(description, additional_info) or ("PayPal: " + description) in self.transferred_expenses:
-                    continue
                 transaction = row[5]
                 # verify if transaction is expense or gain
                 if "-" in transaction:
+                    # verify if expense is recurrent or if it has already been transferred to gsheet
+                    if self.__expense_is_recurrent(description, additional_info) or ("PayPal: " + description) in self.transferred_expenses: # TODO make verification in transferred expenses based n value AND description
+                        continue
                     # transaction is expense
                     expense_sum_as_float = float(transaction.replace("-", "").replace(",", "."))
                     column_index_expense_splitwise = "n"  # not for splitwise as default
                     description = "PayPal: " + description
                     self.expenses2add.update({description: [expense_sum_as_float, "Otros",
                                                        column_index_expense_splitwise]})  # todo differentiate category
-
+        total_paypal_gains = 0.0
+        total_paypal_losses = 0.0
         with open(self.latest_paypal_csv_path, mode='r') as csv_file_paypal:
             csv_reader_paypal = csv.reader(csv_file_paypal, delimiter=',')
             # get total gains and losses
@@ -76,11 +81,13 @@ class Mapper:
                 if "-" not in transaction:
                     # transaction is gain
                     gain = float(transaction.replace(",", "."))
-                    self.total_paypal_gains += gain
+                    total_paypal_gains += gain
                 else:
                     # transaction is loss
                     loss = float(transaction.replace("-", "").replace(",", "."))
-                    self.total_paypal_losses += loss
+                    total_paypal_losses += loss
+
+        self.__paypal_surplus = total_paypal_gains - total_paypal_losses
 
     def __read_bank_csv(self):
         # do not read if not wanted by user
@@ -102,9 +109,9 @@ class Mapper:
                 column_index_expense = row[column_index_expense_splitwise]
                 # only add if it is a negative sum (expense)
                 # verify if expense has already been transferred to gsheet
-                if "-" in expense_sum and description not in self.transferred_expenses:
+                if "-" in expense_sum and description not in self.transferred_expenses: # TODO make verification in transferred expenses based n value AND description
                     if "PayPal" in description:
-                        # paypal expenses have already been added in previous csv reading
+                        # Paypal expenses have already been added in previous csv reading
                         continue
                     # verify if expense is recurrent
                     if self.__expense_is_recurrent(description): continue
@@ -112,16 +119,26 @@ class Mapper:
                     self.expenses2add.update(
                         {description: [expense_sum_as_float, expense_category, column_index_expense]})
 
-    def __create_expenses2exclude(self, transactions_sheet):
+    def __read_transferred_expenses(self, transactions_sheet):
         """
         creates list of expenses that have already been added to gsheet
         :param transactions_sheet:
         :return:
         """
+        print("Reading expenses to exclude from Google Sheets.")
+        transaction_description_empty_rows = 0
         for row_index in range(5, transactions_sheet.row_count + 1):
-            transaction_description = transactions_sheet.cell(str(row_index), str(self.transaction_description_column)).value
-            if transaction_description is not None:
-                self.transferred_expenses.append(transaction_description)
+            if transaction_description_empty_rows > 2:
+                break
+            transaction_description = self.__request_handler.get_request(row_index, self.transaction_description_column, transactions_sheet)
+            if transaction_description is None or transaction_description == "":
+                # increase 'transaction_description_empty_rows' count an continue
+                transaction_description_empty_rows += 1
+                continue
+            else:
+                # reset 'transaction_description_empty_rows' count
+                transaction_description_empty_rows = 0
+            self.transferred_expenses.append(transaction_description)
 
     def __expense_is_recurrent(self, *descriptions):
         for description in descriptions:
@@ -152,13 +169,14 @@ class Mapper:
         client = gspread.service_account()
         workbook = client.open(month_spanish, folder_id=self.__folder_id_year)
         transactions_sheet = workbook.get_worksheet(1)
-        self.__create_expenses2exclude(transactions_sheet)
+        self.__read_transferred_expenses(transactions_sheet)
+        print("Reading CSVs")
         self.__read_csvs()
-        # last_cell.update_cell(row,column, numeric_value/string_value)
+        print("Writing to Google Sheet")
         for row_index in range(5, transactions_sheet.row_count + 1):
             if len(self.expenses2add) == 0:
                 break
-            transaction_value = transactions_sheet.cell(str(row_index), str(self.transaction_value_column)).value
+            transaction_value = self.__request_handler.get_request(row_index, self.transaction_value_column, transactions_sheet)
             if transaction_value is not None:
                 continue  # if value is found in cell go to next free cell
             # get expense information
@@ -168,17 +186,21 @@ class Mapper:
             splitwise_expense = self.expenses2add.get(description2add)[2]
             # if is splitwise expense change cell colour
             if splitwise_expense == "y":
+                # TODO create method for request handler to request address
                 cell_address = transactions_sheet.cell(str(row_index), str(self.transaction_value_column)).address
                 format_cell_range(transactions_sheet, cell_address, self.fmt)
             # update cells
-            transactions_sheet.update_cell(row_index, self.transaction_description_column, description2add)
-            transactions_sheet.update_cell(row_index, self.transaction_value_column, value2add)
-            transactions_sheet.update_cell(row_index, self.transaction_category_column, category2add)
+            self.__request_handler.update_request(row_index, self.transaction_description_column, transactions_sheet,
+                                                  description2add)
+            self.__request_handler.update_request(row_index, self.transaction_value_column, transactions_sheet,
+                                                  value2add)
+            self.__request_handler.update_request(row_index, self.transaction_category_column, transactions_sheet,
+                                                  category2add)
             # remove added item
             self.expenses2add.pop(description2add)
 
         # add gains from paypal
-        transactions_sheet.update_cell(5, 8, self.total_paypal_gains - self.total_paypal_losses)
+        transactions_sheet.update_cell(5, 8, self.__paypal_surplus)
         transactions_sheet.update_cell(5, 9, "PayPal gains")
         transactions_sheet.update_cell(5, 10, "Otros")
 
