@@ -1,0 +1,2 @@
+Folder in Google Drive has to be shared with client email found in json file:
+    C:\Users\bruno\AppData\Roaming\gspread\service_account.json -> (s. https://console.cloud.google.com/iam-admin/serviceaccounts/details/102353359672448200928;edit=true/metrics?project=personal-projects-360115)
