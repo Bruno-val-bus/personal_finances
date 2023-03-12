@@ -1,0 +1,5 @@
+1. Create repo in GitHub page
+2. BASH COMMANDS
+    git remote add origin https://github.com/Bruno-val-bus/<<projectname>>.git
+    git branch -M main
+    git push -u origin main

@@ -92,6 +92,9 @@ class Mapper:
                     total_paypal_losses += loss
 
         self.__paypal_surplus = total_paypal_gains - total_paypal_losses
+        if self.__paypal_surplus < 0:
+            # if negative, no surplus applicable, set to 0
+            self.__paypal_surplus = 0
 
     def __read_bank_csv(self):
         # do not read if not wanted by user
@@ -110,7 +113,11 @@ class Mapper:
                 description = row[column_index_description]
                 expense_sum = row[column_index_expense_sum]
                 expense_category = row[column_index_expense_cat]
-                column_index_expense = row[column_index_expense_splitwise]
+                try:
+                    splitwise_expense = row[column_index_expense_splitwise]
+                except IndexError:
+                    # default is 'no' if not defined in csv
+                    splitwise_expense = "n"
                 # only add if it is a negative sum (expense)
                 # verify if expense has already been transferred to gsheet
                 if "-" in expense_sum and description not in self.transferred_expenses:  # TODO make verification in transferred expenses based on value AND description
@@ -121,7 +128,7 @@ class Mapper:
                     if self.__expense_is_recurrent(description): continue
                     expense_sum_as_float = float(expense_sum.replace("-", "").replace(",", "."))
                     self.expenses2add.update(
-                        {description: [expense_sum_as_float, expense_category, column_index_expense]})
+                        {description: [expense_sum_as_float, expense_category, splitwise_expense]})
 
     def __read_transferred_expenses(self, transactions_sheet):
         """
@@ -170,8 +177,8 @@ class Mapper:
         if self.read_bank_csv is False and self.read_paypal_csv is False:
             print("No data to be mapped to Google Sheet")
             return
-        self.latest_bank_csv_path = self.csvs_path + bank_csv_file + self.__csv_identifier
-        self.latest_paypal_csv_path = self.csvs_path + paypal_csv_file + self.__csv_identifier
+        self.latest_bank_csv_path = os.path.join(self.csvs_path, bank_csv_file + self.__csv_identifier)
+        self.latest_paypal_csv_path = os.path.join(self.csvs_path, paypal_csv_file + self.__csv_identifier)
         # json file with account mail in C:\Users\bruno\AppData\Roaming\gspread s. https://console.cloud.google.com/iam-admin/serviceaccounts/details/102353359672448200928;edit=true/metrics?project=personal-projects-360115
         client = gspread.service_account()
         workbook = client.open(month_spanish, folder_id=self.__folder_id_year)

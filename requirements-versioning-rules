@@ -8,8 +8,8 @@ BASH COMMANDS
 # activate virtual environment
 source path/to/venv/Scripts/activate
 
-# install pip-tools or install it via IDE
-pip install pip-tools
+# install pip-tools via cmd line (running module as script) or install it via IDE
+python -m pip install pip-tools
 
 # Once installed, compile the requirements.in file to requirements.txt
 pip-compile --output-file requirements.txt requirements.in
@@ -22,6 +22,4 @@ pip install -r requirements.txt
 pip-sync requirements.txt
 
 # Deactivate virtual environment
-source path/to/venv/Scripts/deactivate
-#or
 path/to/venv/Scripts/deactivate
