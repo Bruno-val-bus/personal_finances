@@ -2,46 +2,127 @@ import requests
 import json
 import os
 from typing import List, Dict
-from enumerations import ReceiptItems, UnsharedItemIDs
+from enumerations import ReceiptItems, ExceptionsItemIDs, PayloadResults, FileExtensions
+from splitwise import Splitwise, Group, Expense, User
+from config_loader import config
+
+class ReceiptParser:
+
+    def __init__(self):
+        self._splitwise_amount = None
+        self._json_response_path: str = None
+        self.receipt_total_expense: float = 0.0
+        self.receipt_total_expense: float = 0.0
+        self.amount_unshared_items: float = 0.0
+
+    def set_json_response_path(self, json_response_path: str):
+        self._json_response_path = json_response_path
+
+    def _calculate_expenses(self, bought_items: List[Dict]):
+        for item in bought_items:
+            description = item.get(ReceiptItems.DESCRIPTION)
+            amount = float(item.get(ReceiptItems.AMOUNT))
+            if ExceptionsItemIDs.YFOOD in description or \
+                    ExceptionsItemIDs.CRAZY_COCONUT in description \
+                    or ExceptionsItemIDs.COLD_BREW in description:
+                # add amount of item not to be shared to amount to subtract
+                self.amount_unshared_items = self.amount_unshared_items + amount
+            # add to total expense amount
+        start_idx = len(bought_items)-1
+        stop_idx = -1
+        step = -1
+        for idx in range(start_idx, stop_idx, step):
+            description = bought_items[idx].get(ReceiptItems.DESCRIPTION)
+            amount = bought_items[idx].get(ReceiptItems.AMOUNT)
+            if ExceptionsItemIDs.SUMME in description or ExceptionsItemIDs.EUR in description:
+                # if total expense identifier is in description, override current sum and return
+                self.receipt_total_expense = amount
+                return
+
+    def parse_receipt(self):
+        with open(self._json_response_path, "r") as f:
+            data = json.load(f)
+            receipt_content: Dict = data[PayloadResults.RECEIPTS][0]
+            items = receipt_content.get('items')
+            # TODO if receipt_content.get("total") is None just substract unshareable items
+            self._calculate_expenses(items)
+            self._splitwise_amount = self.receipt_total_expense - self.amount_unshared_items
+            print(f"TOTAL: {str(self.receipt_total_expense)}")
+            print(f"SPLITWISE: {str(self._splitwise_amount)}")
 
 
-def get_expense_total(bought_items: List[Dict]):
-    total: float = 0.0
-    for item in bought_items:
-        description = item.get(ReceiptItems.DESCRIPTION)
-        amount = item.get(ReceiptItems.AMOUNT)
-        if UnsharedItemIDs.YFOOD not in description and \
-                UnsharedItemIDs.CRAZY_COCONUT not in description \
-                and UnsharedItemIDs.COLD_BREW not in description\
-                and UnsharedItemIDs.SUMME not in description:
-            total = total + float(amount)
+class OCRRequestSender:
 
+    def __init__(self):
+        self._res: requests.Response = None
+        image = "IMG_0163.jpg"
+        receipts_folder = PayloadResults.RECEIPTS
+        self._receipts_folder_path = os.path.join(os.getcwd(), receipts_folder)
+        #self.image_path = os.path.join(self._receipts_folder_path, image)
+        #self.json_response_path = os.path.join(os.getcwd(), self._receipts_folder_path, image + ".json")
+        self.url = "https://ocr.asprise.com/api/v1/receipt"  # Probably accepting only 5 requests per day. S. alternative (Mindee): https://stackoverflow.com/questions/72509413/how-do-i-use-mindee-api-with-python3
 
-image = "IMG_0163.jpg"
-RECEIPTS = "receipts"
-receipts_folder = os.path.join(os.getcwd(), RECEIPTS)
-image_path = os.path.join(receipts_folder, image)
-json_response_path = os.path.join(os.getcwd(), RECEIPTS, image + ".json")
-url = "https://ocr.asprise.com/api/v1/receipt" # Probably accepting only 5 requests per day. S. alternative (Mindee): https://stackoverflow.com/questions/72509413/how-do-i-use-mindee-api-with-python3
+    def _send_request(self, image_path: str):
+        self._res = requests.post(self.url,
+                                  data={
+                                      "api_key": "TEST",
+                                      "recognizer": "auto",
+                                      "ref_no": "oct_python_123"
+                                  },
+                                  files={
+                                      "file": open(image_path, "rb"),
+                                  }
+                                  )
 
-res = requests.post(url,
-                    data={
-                        "api_key": "TEST",
-                        "recognizer": "auto",
-                        "ref_no": "oct_python_123"
-                    },
-                    files={
-                        "file": open(image_path, "rb"),
-                    }
+    def _save_response(self, json_response_path: str):
+        with open(json_response_path, "w") as f:
+            response_loaded = json.loads(self._res.text)
+            json.dump(response_loaded, f)
+
+    def scan_directory(self):
+        directory = os.fsencode(self._receipts_folder_path)
+        for file in os.listdir(directory):
+            filename = os.fsdecode(file)
+            if not filename.endswith(FileExtensions.JSON):
+                # file is image
+                json_response_path = os.path.join(self._receipts_folder_path, filename + FileExtensions.JSON)
+                receipt_parser = ReceiptParser()
+                receipt_parser.set_json_response_path(json_response_path)
+                if not os.path.exists(json_response_path):
+                    # if corresponding json file does not exist send request to ocr engine and save it
+                    self._send_request(
+                        image_path=os.path.join(self._receipts_folder_path, filename)
                     )
+                    self._save_response(
+                        json_response_path=json_response_path
+                    )
+                # when response is saved or if it already exists, parse receipt
+                receipt_parser.parse_receipt()
 
-with open(json_response_path, "w") as f:
-    response_loaded = json.loads(res.text)
-    json.dump(response_loaded, f)
 
-with open(json_response_path, "r") as f:
-    data = json.load(f)
-    receipt_content = data[RECEIPTS][0]
-    items = receipt_content.get('items')
-    # TODO if receipt_content.get("total") is None just substract unshareable items
-    get_expense_total(items)
+class SplitwiseAPI:
+
+    def __init__(self):
+        splitwiseObj = Splitwise(
+            consumer_key=config.get("SPLITWISE", 'SPLITWISE_API_KEY'),
+            consumer_secret=config.get("SPLITWISE", 'SPLITWISE_API_SECRET'),
+            api_key=config.get("SPLITWISE", 'SPLITWISE_API_KEY_OAUTH20')
+        )
+        group: Group = splitwiseObj.getGroup(id=18955015)
+        expense: Expense = Expense()
+        expense.setCost('999.99')
+        expense.setDescription("TEST EXPENSE")
+        expense.setGroupId(18955015)
+        alex_user_id = group.getMembers()[1].id
+        bruno_user_id = group.getMembers()[0].id
+        alex: User = splitwiseObj.getUser(alex_user_id)
+        bruno: User = splitwiseObj.getUser(bruno_user_id)
+        expense.addUser(bruno)
+        expense.setSplitEqually(True)
+        #expense.addUser(bruno)
+        # TODO: current error: no user added
+        expense, errors = splitwiseObj.createExpense(expense)
+        print(expense.getId())
+
+sw = SplitwiseAPI()
+OCRRequestSender().scan_directory()

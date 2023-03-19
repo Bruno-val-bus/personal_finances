@@ -68,7 +68,7 @@ class Mapper:
                         continue
                     # transaction is expense
                     expense_sum_as_float = float(transaction.replace("-", "").replace(",", "."))
-                    column_index_expense_splitwise = "n"  # not for splitwise as default
+                    column_index_expense_splitwise = "n"  # not for config.ini as default
                     description = "PayPal: " + description
                     self.expenses2add.update({description: [expense_sum_as_float, "Otros",
                                                             column_index_expense_splitwise]})
@@ -199,7 +199,7 @@ class Mapper:
             value2add = self.expenses2add.get(description2add)[0]
             category2add = self.expenses2add.get(description2add)[1]
             splitwise_expense = self.expenses2add.get(description2add)[2]
-            # if is splitwise expense change cell colour
+            # if is config.ini expense change cell colour
             if splitwise_expense == "y":
                 # TODO create method for request handler to request address
                 cell_address = transactions_sheet.cell(str(row_index), str(self.transaction_value_column)).address
