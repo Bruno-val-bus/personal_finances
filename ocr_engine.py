@@ -2,16 +2,20 @@ import requests
 import json
 import os
 from typing import List, Dict
+
+from splitwise.user import ExpenseUser
+
 from enumerations import ReceiptItems, ExceptionsItemIDs, PayloadResults, FileExtensions
 from splitwise import Splitwise, Group, Expense, User
 from config_loader import config
 
+
 class ReceiptParser:
 
     def __init__(self):
-        self._splitwise_amount = None
+        self.splitwise_description: str = None
+        self.splitwise_amount: float = None
         self._json_response_path: str = None
-        self.receipt_total_expense: float = 0.0
         self.receipt_total_expense: float = 0.0
         self.amount_unshared_items: float = 0.0
 
@@ -28,7 +32,7 @@ class ReceiptParser:
                 # add amount of item not to be shared to amount to subtract
                 self.amount_unshared_items = self.amount_unshared_items + amount
             # add to total expense amount
-        start_idx = len(bought_items)-1
+        start_idx = len(bought_items) - 1
         stop_idx = -1
         step = -1
         for idx in range(start_idx, stop_idx, step):
@@ -43,12 +47,14 @@ class ReceiptParser:
         with open(self._json_response_path, "r") as f:
             data = json.load(f)
             receipt_content: Dict = data[PayloadResults.RECEIPTS][0]
-            items = receipt_content.get('items')
-            # TODO if receipt_content.get("total") is None just substract unshareable items
+            items: List[Dict] = receipt_content.get('items')
+            date: str = receipt_content.get('date')
+            super_market: str = receipt_content.get('merchant_name')
+            self.splitwise_description = f"{date}: {super_market}"
             self._calculate_expenses(items)
-            self._splitwise_amount = self.receipt_total_expense - self.amount_unshared_items
+            self.splitwise_amount = self.receipt_total_expense - self.amount_unshared_items
             print(f"TOTAL: {str(self.receipt_total_expense)}")
-            print(f"SPLITWISE: {str(self._splitwise_amount)}")
+            print(f"SPLITWISE: {str(self.splitwise_amount)}")
 
 
 class OCRRequestSender:
@@ -58,9 +64,10 @@ class OCRRequestSender:
         image = "IMG_0163.jpg"
         receipts_folder = PayloadResults.RECEIPTS
         self._receipts_folder_path = os.path.join(os.getcwd(), receipts_folder)
-        #self.image_path = os.path.join(self._receipts_folder_path, image)
-        #self.json_response_path = os.path.join(os.getcwd(), self._receipts_folder_path, image + ".json")
+        # self.image_path = os.path.join(self._receipts_folder_path, image)
+        # self.json_response_path = os.path.join(os.getcwd(), self._receipts_folder_path, image + ".json")
         self.url = "https://ocr.asprise.com/api/v1/receipt"  # Probably accepting only 5 requests per day. S. alternative (Mindee): https://stackoverflow.com/questions/72509413/how-do-i-use-mindee-api-with-python3
+        self._splitwiseAPI: SplitwiseAPI = SplitwiseAPI()
 
     def _send_request(self, image_path: str):
         self._res = requests.post(self.url,
@@ -98,31 +105,49 @@ class OCRRequestSender:
                     )
                 # when response is saved or if it already exists, parse receipt
                 receipt_parser.parse_receipt()
+                errors = self._splitwiseAPI.add_expense(amount_shared=receipt_parser.splitwise_amount,
+                                                        expense_description=receipt_parser.splitwise_description)
+                if errors is None:
+                    # TODO if no error with expense creation, tag receipt image or track via sql database
+                    pass
+                else:
+                    # TODO log error
+                    pass
 
 
 class SplitwiseAPI:
 
     def __init__(self):
-        splitwiseObj = Splitwise(
+        self._splitwiseObj = Splitwise(
             consumer_key=config.get("SPLITWISE", 'SPLITWISE_API_KEY'),
             consumer_secret=config.get("SPLITWISE", 'SPLITWISE_API_SECRET'),
             api_key=config.get("SPLITWISE", 'SPLITWISE_API_KEY_OAUTH20')
         )
-        group: Group = splitwiseObj.getGroup(id=18955015)
-        expense: Expense = Expense()
-        expense.setCost('999.99')
-        expense.setDescription("TEST EXPENSE")
-        expense.setGroupId(18955015)
-        alex_user_id = group.getMembers()[1].id
-        bruno_user_id = group.getMembers()[0].id
-        alex: User = splitwiseObj.getUser(alex_user_id)
-        bruno: User = splitwiseObj.getUser(bruno_user_id)
-        expense.addUser(bruno)
-        expense.setSplitEqually(True)
-        #expense.addUser(bruno)
-        # TODO: current error: no user added
-        expense, errors = splitwiseObj.createExpense(expense)
-        print(expense.getId())
+        self._groupID = 18955015
+        group: Group = self._splitwiseObj.getGroup(id=self._groupID)
+        self._alex_user_id = group.getMembers()[1].id
+        self._bruno_user_id = group.getMembers()[0].id
+        self._alex = ExpenseUser()
+        self._alex.setId(self._alex_user_id)
+        self._bruno = ExpenseUser()
+        self._bruno.setId(self._bruno_user_id)
 
-sw = SplitwiseAPI()
+    def add_expense(self, amount_shared: float, expense_description: str):
+        expense: Expense = Expense()
+        owed_shared = round(amount_shared / 2, 2)
+        amount_shared = owed_shared * 2
+        expense.setCost(str(amount_shared))
+        expense.setDescription(expense_description)
+        expense.setGroupId(self._groupID)
+        self._bruno.setPaidShare(str(amount_shared))
+        self._bruno.setOwedShare(str(owed_shared))
+        self._alex.setPaidShare('0.00')
+        self._alex.setOwedShare(str(owed_shared))
+        expense.addUser(self._bruno)
+        expense.addUser(self._alex)
+        expense.setSplitEqually(True)
+        expense, errors = self._splitwiseObj.createExpense(expense)
+        return errors
+
+
 OCRRequestSender().scan_directory()
