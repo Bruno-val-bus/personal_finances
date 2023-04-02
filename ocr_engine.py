@@ -5,9 +5,9 @@ from typing import List, Dict
 
 from splitwise.user import ExpenseUser
 
-from enumerations import ReceiptItems, ExceptionsItemIDs, PayloadResults, FileExtensions
-from splitwise import Splitwise, Group, Expense, User
-from config_loader import config
+from ocr.enumerations import ReceiptItems, ExceptionsItemIDs, PayloadResults, FileExtensions
+from splitwise import Splitwise, Group, Expense
+from ocr.config_loader import config
 
 
 class ReceiptParser:
