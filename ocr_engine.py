@@ -4,9 +4,10 @@ import os
 from typing import List, Dict
 
 from splitwise.user import ExpenseUser
+from splitwise import Splitwise, Group, Expense
 
 from ocr.enumerations import ReceiptItems, ExceptionsItemIDs, PayloadResults, FileExtensions
-from splitwise import Splitwise, Group, Expense
+from ocr.db import db_transactions
 from ocr.config_loader import config
 
 
@@ -90,6 +91,8 @@ class OCRRequestSender:
         directory = os.fsencode(self._receipts_folder_path)
         for file in os.listdir(directory):
             filename = os.fsdecode(file)
+            if filename in db_transactions.get_receipts_added2splitwise(col_name=db_transactions.FILE_NAME):
+                continue
             if not filename.endswith(FileExtensions.JSON):
                 # file is image
                 json_response_path = os.path.join(self._receipts_folder_path, filename + FileExtensions.JSON)
@@ -103,16 +106,20 @@ class OCRRequestSender:
                     self._save_response(
                         json_response_path=json_response_path
                     )
+                # TODO verify self._res.text to see if the return content is actually the parsed receipt or if the day limit has been reached
+                ocr_parsed = True
                 # when response is saved or if it already exists, parse receipt
                 receipt_parser.parse_receipt()
+                # TODO: maybe more robust if you check if the receipt_parser.splitwise_description has already been added to splitwise to account for adding a new image that has already been parsed:
+                #   add column to existing table and retrieve the splitwise_description's using db_transactions.get_receipts_added2splitwise(col_name=db_transactions.ADDED2SPLITWISE)
                 errors = self._splitwiseAPI.add_expense(amount_shared=receipt_parser.splitwise_amount,
                                                         expense_description=receipt_parser.splitwise_description)
                 if errors is None:
-                    # TODO if no error with expense creation, tag receipt image or track via sql database
-                    pass
+                    # if no error with expense creation, tag receipt image or track via sql database
+                    db_transactions.insert_receipt(file_name=filename, added2splitwise=True, ocr_parsed=ocr_parsed)
                 else:
-                    # TODO log error
-                    pass
+                    # TODO log error in sql
+                    db_transactions.insert_receipt(file_name=filename, added2splitwise=False, ocr_parsed=ocr_parsed)
 
 
 class SplitwiseAPI:
@@ -151,3 +158,4 @@ class SplitwiseAPI:
 
 
 OCRRequestSender().scan_directory()
+# TODO download drive images to folder (https://stackoverflow.com/questions/38511444/python-download-files-from-google-drive-using-url && https://iq.opengenus.org/google-drive-file-download-upload/)

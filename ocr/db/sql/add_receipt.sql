@@ -1,0 +1,1 @@
+INSERT INTO receipts (file_name, added2splitwise, ocr_parsed) VALUES (?, ?, ?)
