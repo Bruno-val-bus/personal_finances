@@ -120,7 +120,7 @@ class Mapper:
                     splitwise_expense = "n"
                 # only add if it is a negative sum (expense)
                 # verify if expense has already been transferred to gsheet
-                if "-" in expense_sum and description not in self.transferred_expenses:  # TODO make verification in transferred expenses based on value AND description
+                if "-" in expense_sum and description not in self.transferred_expenses:  # TODO make verification in transferred expenses based on value AND description (otherwise if a vendor is used twice it wont be captured as an expense)
                     if "PayPal" in description:
                         # PayPal's expenses have already been added in previous csv reading
                         continue

@@ -62,11 +62,8 @@ class OCRRequestSender:
 
     def __init__(self):
         self._res: requests.Response = None
-        image = "IMG_0163.jpg"
         receipts_folder = PayloadResults.RECEIPTS
         self._receipts_folder_path = os.path.join(os.getcwd(), receipts_folder)
-        # self.image_path = os.path.join(self._receipts_folder_path, image)
-        # self.json_response_path = os.path.join(os.getcwd(), self._receipts_folder_path, image + ".json")
         self.url = "https://ocr.asprise.com/api/v1/receipt"  # Probably accepting only 5 requests per day. S. alternative (Mindee): https://stackoverflow.com/questions/72509413/how-do-i-use-mindee-api-with-python3
         self._splitwiseAPI: SplitwiseAPI = SplitwiseAPI()
 
@@ -159,3 +156,4 @@ class SplitwiseAPI:
 
 OCRRequestSender().scan_directory()
 # TODO download drive images to folder (https://stackoverflow.com/questions/38511444/python-download-files-from-google-drive-using-url && https://iq.opengenus.org/google-drive-file-download-upload/)
+# host in replit https://www.youtube.com/watch?v=D7OWuslFYCw
