@@ -10,6 +10,10 @@ ID = "id"
 FILE_NAME = "file_name"
 ADDED2SPLITWISE = "added2splitwise"
 OCR_PARSED = "ocr_parsed"
+SPLITWISE_API_ERROR = "splitwiseAPI_error"
+PARTIALLY_PARSED = "partially_shared"
+SPLITWISE_DESCRIPTION = "splitwise_description"
+
 col_name_idx_map = {
     ID: 0,
     FILE_NAME: 1,
@@ -32,7 +36,7 @@ def create_receipts() -> None:
     conn.close()
 
 
-def insert_receipt(file_name: str, added2splitwise: bool, ocr_parsed: bool, splitwiseAPI_error: str, partially_shared: bool) -> List:
+def insert_receipt(file_name: str, added2splitwise: bool, ocr_parsed: bool, splitwiseAPI_error: str, partially_shared: bool, splitwise_description: str) -> List:
     # create connection
     conn = sqlite3.connect(OCR_DB_PATH)
     # Create a cursor
@@ -40,7 +44,7 @@ def insert_receipt(file_name: str, added2splitwise: bool, ocr_parsed: bool, spli
     # get raw sql query
     raw_sql = read_sql_query(ADD_RECEIPTS_SQL)
     # execute SQL command to insert a row into the table
-    cur.execute(raw_sql, (file_name, added2splitwise, ocr_parsed, splitwiseAPI_error, partially_shared))
+    cur.execute(raw_sql, (file_name, added2splitwise, ocr_parsed, splitwiseAPI_error, partially_shared, splitwise_description))
     # commit transaction
     conn.commit()
     cur.execute("SELECT * FROM receipts")

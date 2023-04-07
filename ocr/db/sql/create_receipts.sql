@@ -4,5 +4,6 @@ CREATE TABLE receipts (
     added2splitwise BOOL NOT NULL,
     ocr_parsed BOOL NOT NULL,
     splitwiseAPI_error TEXT,
-    partially_shared BOOL not NULL
+    partially_shared BOOL not NULL,
+    splitwise_description TEXT not NULL
 );

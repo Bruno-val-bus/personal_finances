@@ -17,3 +17,6 @@ class PayloadResults:
 
 class FileExtensions:
     JSON = ".json"
+    PARTIAL_DENOMINATOR = "__part"
+    DRIVE_DOWNLOAD_DENOMINATOR = ".drivedownload"
+    DRIVE_UPLOAD_DENOMINATOR = ".driveupload"
