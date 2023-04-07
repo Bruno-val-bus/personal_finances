@@ -32,7 +32,7 @@ def create_receipts() -> None:
     conn.close()
 
 
-def insert_receipt(file_name: str, added2splitwise: bool, ocr_parsed: bool) -> List:
+def insert_receipt(file_name: str, added2splitwise: bool, ocr_parsed: bool, splitwiseAPI_error: str, partially_shared: bool) -> List:
     # create connection
     conn = sqlite3.connect(OCR_DB_PATH)
     # Create a cursor
@@ -40,7 +40,7 @@ def insert_receipt(file_name: str, added2splitwise: bool, ocr_parsed: bool) -> L
     # get raw sql query
     raw_sql = read_sql_query(ADD_RECEIPTS_SQL)
     # execute SQL command to insert a row into the table
-    cur.execute(raw_sql, (file_name, added2splitwise, ocr_parsed))
+    cur.execute(raw_sql, (file_name, added2splitwise, ocr_parsed, splitwiseAPI_error, partially_shared))
     # commit transaction
     conn.commit()
     cur.execute("SELECT * FROM receipts")

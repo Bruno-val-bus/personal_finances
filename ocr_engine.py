@@ -1,3 +1,6 @@
+from mindee import Client, documents
+from mindee.client import DocumentClient
+from mindee.response import PredictResponse
 import requests
 import json
 import os
@@ -58,17 +61,30 @@ class ReceiptParser:
             print(f"SPLITWISE: {str(self.splitwise_amount)}")
 
 
+class ReceiptParserMindee(ReceiptParser):
+    def __init__(self):
+        super(ReceiptParserMindee, self).__init__()
+
+    def extract_expenses_data(self, api_response: PredictResponse) -> None:
+        date = api_response.document.date.value
+        time = api_response.document.time.value
+        amount = api_response.document.total_incl.value
+        merchant = api_response.document.merchant_name
+        self.splitwise_description = f"{date} at {time}:{merchant}"
+        self.splitwise_amount = float(amount)
+
+
 class OCRRequestSender:
 
     def __init__(self):
         self._res: requests.Response = None
         receipts_folder = PayloadResults.RECEIPTS
-        self._receipts_folder_path = os.path.join(os.getcwd(), receipts_folder)
-        self.url = "https://ocr.asprise.com/api/v1/receipt"  # Probably accepting only 5 requests per day. S. alternative (Mindee): https://stackoverflow.com/questions/72509413/how-do-i-use-mindee-api-with-python3
-        self._splitwiseAPI: SplitwiseAPI = SplitwiseAPI()
+        self.receipts_folder_path = os.path.join(os.getcwd(), receipts_folder)
+        self._url = "https://ocr.asprise.com/api/v1/receipt"  # Probably accepting only 5 requests per day. S. alternative (Mindee): https://stackoverflow.com/questions/72509413/how-do-i-use-mindee-api-with-python3
+        self.splitwiseAPI: SplitwiseAPI = SplitwiseAPI()
 
     def _send_request(self, image_path: str):
-        self._res = requests.post(self.url,
+        self._res = requests.post(self._url,
                                   data={
                                       "api_key": "TEST",
                                       "recognizer": "auto",
@@ -85,38 +101,39 @@ class OCRRequestSender:
             json.dump(response_loaded, f)
 
     def scan_directory(self):
-        directory = os.fsencode(self._receipts_folder_path)
+        directory = os.fsencode(self.receipts_folder_path)
         for file in os.listdir(directory):
             filename = os.fsdecode(file)
             if filename in db_transactions.get_receipts_added2splitwise(col_name=db_transactions.FILE_NAME):
                 continue
             if not filename.endswith(FileExtensions.JSON):
                 # file is image
-                json_response_path = os.path.join(self._receipts_folder_path, filename + FileExtensions.JSON)
+                json_response_path = os.path.join(self.receipts_folder_path, filename + FileExtensions.JSON)
                 receipt_parser = ReceiptParser()
                 receipt_parser.set_json_response_path(json_response_path)
                 if not os.path.exists(json_response_path):
                     # if corresponding json file does not exist send request to ocr engine and save it
                     self._send_request(
-                        image_path=os.path.join(self._receipts_folder_path, filename)
+                        image_path=os.path.join(self.receipts_folder_path, filename)
                     )
                     self._save_response(
                         json_response_path=json_response_path
                     )
                 # TODO verify self._res.text to see if the return content is actually the parsed receipt or if the day limit has been reached
                 ocr_parsed = True
+                partially_shared = False
                 # when response is saved or if it already exists, parse receipt
                 receipt_parser.parse_receipt()
                 # TODO: maybe more robust if you check if the receipt_parser.splitwise_description has already been added to splitwise to account for adding a new image that has already been parsed:
                 #   add column to existing table and retrieve the splitwise_description's using db_transactions.get_receipts_added2splitwise(col_name=db_transactions.ADDED2SPLITWISE)
-                errors = self._splitwiseAPI.add_expense(amount_shared=receipt_parser.splitwise_amount,
-                                                        expense_description=receipt_parser.splitwise_description)
+                errors = self.splitwiseAPI.add_expense(amount_shared=receipt_parser.splitwise_amount,
+                                                       expense_description=receipt_parser.splitwise_description)
                 if errors is None:
                     # if no error with expense creation, tag receipt image or track via sql database
-                    db_transactions.insert_receipt(file_name=filename, added2splitwise=True, ocr_parsed=ocr_parsed)
+                    db_transactions.insert_receipt(file_name=filename, added2splitwise=True, ocr_parsed=ocr_parsed, splitwiseAPI_error="", partially_shared=partially_shared)
                 else:
                     # TODO log error in sql
-                    db_transactions.insert_receipt(file_name=filename, added2splitwise=False, ocr_parsed=ocr_parsed)
+                    db_transactions.insert_receipt(file_name=filename, added2splitwise=False, ocr_parsed=ocr_parsed, splitwiseAPI_error="error", partially_shared=partially_shared)
 
 
 class SplitwiseAPI:
@@ -154,6 +171,50 @@ class SplitwiseAPI:
         return errors
 
 
-OCRRequestSender().scan_directory()
+class OCRAPI(OCRRequestSender):
+    def __init__(self):
+        super(OCRAPI, self).__init__()
+        # Init a new client
+        self._mindee_client: Client = Client(api_key=config.get("OCR_ENGINE", 'MINDEE_API_KEY'))
+        self._input_doc: DocumentClient = None
+        self._api_response: PredictResponse = None
+
+    def scan_directory(self):
+        directory = os.fsencode(self.receipts_folder_path)
+        for file in os.listdir(directory):
+            filename = os.fsdecode(file)
+            if filename in db_transactions.get_receipts_added2splitwise(col_name=db_transactions.FILE_NAME):
+                continue
+            if not filename.endswith(FileExtensions.JSON):
+                # file is image
+                json_response_path = os.path.join(self.receipts_folder_path, filename + FileExtensions.JSON)
+                receipt_parser = ReceiptParserMindee()
+                receipt_parser.set_json_response_path(json_response_path)
+                if not os.path.exists(json_response_path):
+                    # if corresponding json file does not exist send request to ocr engine and save it
+                    # Load a file from disk
+                    image_path = os.path.join(self.receipts_folder_path, filename)
+                    self._input_doc = self._mindee_client.doc_from_path(image_path)
+                    # Parse the document by passing the appropriate type
+                    self._api_response = self._input_doc.parse(documents.TypeReceiptV3)
+                    # Print a brief summary of the parsed data
+                    print(self._api_response.document)
+                # TODO verify self._api_response to see if the return content is actually the parsed receipt or if the monthly limit has been reached
+                ocr_parsed = True
+                # when response is saved or if it already exists, parse receipt
+                receipt_parser.extract_expenses_data(self._api_response)
+                # TODO: maybe more robust if you check if the receipt_parser.splitwise_description has already been added to splitwise to account for adding a new image that has already been parsed:
+                #   add column to existing table and retrieve the splitwise_description's using db_transactions.get_receipts_added2splitwise(col_name=db_transactions.ADDED2SPLITWISE)
+                errors = self.splitwiseAPI.add_expense(amount_shared=receipt_parser.splitwise_amount,
+                                                       expense_description=receipt_parser.splitwise_description)
+                if errors is None:
+                    # if no error with expense creation, tag receipt image or track via sql database
+                    db_transactions.insert_receipt(file_name=filename, added2splitwise=True, ocr_parsed=ocr_parsed, splitwiseAPI_error="", partially_shared=partially_shared)
+                else:
+                    # TODO log error in sql
+                    db_transactions.insert_receipt(file_name=filename, added2splitwise=False, ocr_parsed=ocr_parsed, splitwiseAPI_error="error", partially_shared=partially_shared)
+
+
+OCRAPI().scan_directory()
 # TODO download drive images to folder (https://stackoverflow.com/questions/38511444/python-download-files-from-google-drive-using-url && https://iq.opengenus.org/google-drive-file-download-upload/)
 # host in replit https://www.youtube.com/watch?v=D7OWuslFYCw
